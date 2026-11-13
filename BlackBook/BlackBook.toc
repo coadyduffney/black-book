@@ -1,0 +1,10 @@
+## Interface: 16001
+## Title: Black Book
+## Notes: Remembers the players who kill you in open-world PvP.
+## Version: 1.0.0
+## IconTexture: Interface\Icons\INV_Misc_Book_06
+## SavedVariablesPerCharacter: BlackBookDB
+## AddonCompartmentFunc: BlackBook_OnAddonCompartmentClick
+
+Core.lua
+UI.lua
