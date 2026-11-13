@@ -8,6 +8,8 @@ local RECAP_POLL_ATTEMPTS = 20
 local defaults = {
     version = DB_VERSION,
     announce = true,
+    alerts = true,
+    alertSound = true,
     killers = {},
     window = {},
 }
@@ -119,6 +121,8 @@ local function GetOrCreateEntry(source, now)
         entry = { name = source.name, count = 0, assists = 0, firstSeen = now }
         ns.db.killers[source.name] = entry
     end
+
+    entry.guid = source.guid
 
     local ok, _, englishClass, localizedRace = pcall(GetPlayerInfoByGUID, source.guid)
     if ok then
@@ -236,6 +240,14 @@ SlashCmdList.BLACKBOOK = function(input)
     elseif command == "announce" then
         ns.db.announce = not ns.db.announce
         ns.Print("Chat announcements " .. (ns.db.announce and "on." or "off."))
+    elseif command == "alerts" then
+        ns.db.alerts = not ns.db.alerts
+        ns.Print("Nearby alerts " .. (ns.db.alerts and "on." or "off."))
+    elseif command == "sound" then
+        ns.db.alertSound = not ns.db.alertSound
+        ns.Print("Alert sound " .. (ns.db.alertSound and "on." or "off."))
+    elseif command == "test" then
+        ns.ShowAlert({ name = UnitName("player"), class = select(2, UnitClass("player")), count = 3, assists = 1 })
     elseif command == "reset" then
         StaticPopup_Show("BLACKBOOK_RESET")
     elseif command == "last" then
@@ -244,6 +256,9 @@ SlashCmdList.BLACKBOOK = function(input)
         ns.Print("Commands:")
         print("  /blackbook - show or hide the window")
         print("  /blackbook announce - toggle the chat message when players kill you")
+        print("  /blackbook alerts - toggle the warning when a listed player is nearby")
+        print("  /blackbook sound - toggle the warning sound")
+        print("  /blackbook test - show a sample warning")
         print("  /blackbook last - explain how your last death was read")
         print("  /blackbook reset - erase all entries")
     end

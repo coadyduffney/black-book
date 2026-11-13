@@ -9,6 +9,7 @@ A World of Warcraft: Forever addon that remembers the players who kill you in op
 - A movable window listing each player's name (in class colour), kills, assists, and how long ago you last ran into them. Click a column header to sort by it.
 - A tooltip for each player, showing race and class, first and last encounters, the zone, and the last killing-blow spell.
 - An optional chat message whenever players kill you.
+- A warning on screen, with a sound, when a player in your Black Book comes into range.
 
 Deaths inside battlegrounds, arenas, dungeons and raids are ignored.
 
@@ -25,6 +26,9 @@ Deaths inside battlegrounds, arenas, dungeons and raids are ignored.
 | --- | --- |
 | `/blackbook` or `/bbook` | Show or hide the window |
 | `/blackbook announce` | Turn the chat message on or off |
+| `/blackbook alerts` | Turn the nearby-player warning on or off |
+| `/blackbook sound` | Turn the warning sound on or off |
+| `/blackbook test` | Show a sample warning |
 | `/blackbook last` | Show how your most recent death was read |
 | `/blackbook reset` | Erase all entries |
 
@@ -38,6 +42,8 @@ Because of this:
 
 - Assists only cover the last few hits the Death Recap keeps, not the whole fight.
 - Damage from pets, totems and guardians can't be credited to the player who owns them.
+
+Nearby players are detected when their nameplate appears, or when you target or mouse over them. Enemy nameplates need to be turned on for the warning to reach the full nameplate range. Each player triggers the warning at most once a minute.
 
 Data is saved separately for each character, in `WTF\Account\<ACCOUNT>\<Realm>\<Character>\SavedVariables\BlackBook.lua`.
 
