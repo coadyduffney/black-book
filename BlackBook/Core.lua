@@ -1,21 +1,23 @@
 local addonName, ns = ...
 
-local DB_VERSION = 2
+local DB_VERSION = 3
 -- The death recap is filled in shortly after PLAYER_DEAD, so poll for it briefly.
 local RECAP_POLL_INTERVAL = 0.25
 local RECAP_POLL_ATTEMPTS = 20
+local MAX_NAMEPLATES = 40
 
 local defaults = {
     version = DB_VERSION,
     announce = true,
     alerts = true,
     alertSound = true,
-    killers = {},
-    window = {},
+    -- Every player you have killed, or who has killed you or assisted on your death, keyed by name.
+    players = {},
+    streak = 0,
+    bestStreak = 0,
+    window = { tab = 1 },
     minimap = { hide = false, angle = 225 },
 }
-
-local MAX_NAMEPLATES = 40
 
 local lastRecapIdentity
 
@@ -32,6 +34,28 @@ local function Readable(value)
 end
 ns.Readable = Readable
 
+local function Plural(count, word)
+    return count .. " " .. word .. (count == 1 and "" or "s")
+end
+
+-- The Black Book itself: players who have killed you or assisted on your death.
+function ns.IsListed(entry)
+    return entry.deaths > 0 or entry.assists > 0
+end
+
+function ns.FormatRecord(entry)
+    return Plural(entry.kills, "kill") .. ", " .. Plural(entry.deaths, "death")
+end
+
+-- Death recap names cross-realm players as "Name-Realm", with spaces removed from the realm.
+local function MakeKey(name, realm)
+    if type(realm) == "string" and realm ~= "" then
+        return name .. "-" .. realm:gsub("%s", "")
+    end
+    return name
+end
+ns.MakeKey = MakeKey
+
 -- Only units the game has a token for can be inspected, so look where the player might be visible.
 local function FindUnitByGUID(guid)
     for _, unit in ipairs({ "target", "mouseover", "focus" }) do
@@ -47,13 +71,26 @@ local function FindUnitByGUID(guid)
     end
 end
 
--- UnitLevel returns -1 for players too far above you to see their level.
-function ns.UpdateLevel(entry, unit)
-    local level = Readable(UnitLevel(unit))
+-- Level -1 means the player is too far above you to see their level.
+local function SetLevel(entry, level)
+    level = Readable(level)
     if type(level) == "number" and level ~= 0 then
         entry.level = level
         entry.levelSeen = time()
     end
+end
+
+function ns.UpdateLevel(entry, unit)
+    SetLevel(entry, UnitLevel(unit))
+end
+
+-- Returns name, realm, englishClass, localizedRace and level for a player GUID, as far as known.
+local function GetPlayerInfo(guid)
+    local ok, _, englishClass, localizedRace, _, _, name, realm, level = pcall(GetPlayerInfoByGUID, guid)
+    if not ok then
+        return nil
+    end
+    return Readable(name), Readable(realm), Readable(englishClass), Readable(localizedRace), Readable(level)
 end
 
 local function MergeDefaults(target, source)
@@ -64,6 +101,48 @@ local function MergeDefaults(target, source)
             MergeDefaults(target[key], value)
         end
     end
+end
+
+local function GetCurrentZone()
+    local zone = GetRealZoneText()
+    local subZone = GetSubZoneText()
+    if subZone and subZone ~= "" and subZone ~= zone then
+        zone = subZone .. ", " .. zone
+    end
+    return zone
+end
+
+local function FindEntryByGUID(guid)
+    for _, entry in pairs(ns.db.players) do
+        if entry.guid == guid then
+            return entry
+        end
+    end
+end
+
+local function GetOrCreateEntry(guid, name, now)
+    local entry = FindEntryByGUID(guid) or ns.db.players[name]
+    if not entry then
+        entry = { name = name, kills = 0, deaths = 0, assists = 0, firstSeen = now }
+        ns.db.players[name] = entry
+    end
+    entry.guid = guid
+
+    local _, _, englishClass, localizedRace, level = GetPlayerInfo(guid)
+    entry.class = englishClass or entry.class
+    entry.race = localizedRace or entry.race
+    if level then
+        SetLevel(entry, level)
+    else
+        local unit = FindUnitByGUID(guid)
+        if unit then
+            ns.UpdateLevel(entry, unit)
+        end
+    end
+
+    entry.lastSeen = now
+    entry.lastZone = GetCurrentZone()
+    return entry
 end
 
 local function GetLatestRecapID()
@@ -134,46 +213,12 @@ local function GetDeathParticipants(events)
     return killer, assisters
 end
 
-local function GetCurrentZone()
-    local zone = GetRealZoneText()
-    local subZone = GetSubZoneText()
-    if subZone and subZone ~= "" and subZone ~= zone then
-        zone = subZone .. ", " .. zone
-    end
-    return zone
-end
-
-local function GetOrCreateEntry(source, now)
-    local entry = ns.db.killers[source.name]
-    if not entry then
-        entry = { name = source.name, count = 0, assists = 0, firstSeen = now }
-        ns.db.killers[source.name] = entry
-    end
-
-    entry.guid = source.guid
-
-    local unit = FindUnitByGUID(source.guid)
-    if unit then
-        ns.UpdateLevel(entry, unit)
-    end
-
-    local ok, _, englishClass, localizedRace = pcall(GetPlayerInfoByGUID, source.guid)
-    if ok then
-        entry.class = Readable(englishClass) or entry.class
-        entry.race = Readable(localizedRace) or entry.race
-    end
-
-    entry.lastSeen = now
-    entry.lastZone = GetCurrentZone()
-    return entry
-end
-
 local function RecordDeath(killer, assisters)
     local now = time()
     local assisterNames = {}
 
     for _, source in ipairs(assisters) do
-        local entry = GetOrCreateEntry(source, now)
+        local entry = GetOrCreateEntry(source.guid, source.name, now)
         entry.assists = entry.assists + 1
         entry.lastAssist = now
         assisterNames[#assisterNames + 1] = source.name
@@ -181,18 +226,17 @@ local function RecordDeath(killer, assisters)
 
     local killerEntry
     if killer then
-        killerEntry = GetOrCreateEntry(killer, now)
-        killerEntry.count = killerEntry.count + 1
-        killerEntry.firstKill = killerEntry.firstKill or now
-        killerEntry.lastKill = now
+        killerEntry = GetOrCreateEntry(killer.guid, killer.name, now)
+        killerEntry.deaths = killerEntry.deaths + 1
+        killerEntry.lastDeath = now
         killerEntry.lastSpell = killer.spell
     end
 
     if ns.db.announce then
         local assistText = #assisterNames > 0 and (" Assisted by " .. table.concat(assisterNames, ", ") .. ".") or ""
         if killerEntry then
-            local times = killerEntry.count == 1 and "once" or (killerEntry.count .. " times")
-            ns.Print(format("%s has now killed you %s.%s", killer.name, times, assistText))
+            ns.Print(format("%s killed you.%s Your record against them: %s.",
+                killer.name, assistText, ns.FormatRecord(killerEntry)))
         else
             ns.Print("The killing blow wasn't from a player." .. assistText)
         end
@@ -218,15 +262,50 @@ local function ProcessDeath(attempt)
     end
 end
 
-function ns.RemoveKiller(key)
-    ns.db.killers[key] = nil
+local function RecordKill(victimGUID)
+    ns.db.streak = ns.db.streak + 1
+    ns.db.bestStreak = max(ns.db.bestStreak, ns.db.streak)
+
+    local name, realm = GetPlayerInfo(victimGUID)
+    if not name then
+        local unit = FindUnitByGUID(victimGUID)
+        if unit then
+            name, realm = UnitName(unit)
+            name, realm = Readable(name), Readable(realm)
+        end
+    end
+
+    local entry
+    if name then
+        entry = GetOrCreateEntry(victimGUID, MakeKey(name, realm), time())
+        entry.kills = entry.kills + 1
+        entry.lastKill = entry.lastSeen
+    end
+
+    if ns.db.announce then
+        local streakText = format("Kill streak: %d.", ns.db.streak)
+        if entry then
+            ns.Print(format("You killed %s! %s Your record against them: %s.",
+                entry.name, streakText, ns.FormatRecord(entry)))
+        else
+            ns.Print("You killed a player! " .. streakText)
+        end
+    end
+
+    ns.UI:Refresh()
+end
+
+function ns.RemoveEntry(key)
+    ns.db.players[key] = nil
     ns.UI:Refresh()
 end
 
 function ns.ResetAll()
-    wipe(ns.db.killers)
+    wipe(ns.db.players)
+    ns.db.streak = 0
+    ns.db.bestStreak = 0
     ns.UI:Refresh()
-    ns.Print("All entries have been erased.")
+    ns.Print("All entries and streaks have been erased.")
 end
 
 local function PrintLastRecap()
@@ -254,7 +333,7 @@ local function PrintLastRecap()
 end
 
 StaticPopupDialogs["BLACKBOOK_RESET"] = {
-    text = "Erase every name in your Black Book?",
+    text = "Erase every name in your Black Book, along with your kills and streaks?",
     button1 = YES,
     button2 = NO,
     OnAccept = function() ns.ResetAll() end,
@@ -267,13 +346,14 @@ StaticPopupDialogs["BLACKBOOK_RESET"] = {
 local HELP_LINES = {
     { "", "show or hide the window" },
     { "help", "list these commands" },
-    { "announce", "toggle the chat message when players kill you" },
+    { "announce", "toggle the chat messages for your kills and deaths" },
     { "alerts", "toggle the warning when a listed player is nearby" },
     { "sound", "toggle the warning sound" },
     { "minimap", "show or hide the minimap button" },
+    { "streak", "show your current and best kill streak" },
     { "test", "show a sample warning" },
     { "last", "explain how your last death was read" },
-    { "reset", "erase all entries" },
+    { "reset", "erase all entries and streaks" },
 }
 
 local function PrintHelp()
@@ -303,8 +383,10 @@ SlashCmdList.BLACKBOOK = function(input)
         ns.db.minimap.hide = not ns.db.minimap.hide
         ns.UpdateMinimapButton()
         ns.Print("Minimap button " .. (ns.db.minimap.hide and "hidden." or "shown."))
+    elseif command == "streak" then
+        ns.Print(format("Kill streak: %d. Best: %d.", ns.db.streak, ns.db.bestStreak))
     elseif command == "test" then
-        ns.ShowAlert({ name = UnitName("player"), class = select(2, UnitClass("player")), count = 3, assists = 1 })
+        ns.ShowAlert({ name = UnitName("player"), class = select(2, UnitClass("player")), kills = 2, deaths = 5, assists = 1 })
     elseif command == "reset" then
         StaticPopup_Show("BLACKBOOK_RESET")
     elseif command == "last" then
@@ -320,6 +402,32 @@ function BlackBook_OnAddonCompartmentClick()
     ns.UI:Toggle()
 end
 
+local function Migrate(db)
+    if db.version < 2 then
+        for _, entry in pairs(db.killers or {}) do
+            entry.assists = entry.assists or 0
+            entry.firstSeen = entry.firstSeen or entry.firstKill
+            entry.lastSeen = entry.lastSeen or entry.lastKill
+        end
+    end
+
+    -- Version 3 tracks your kills too: "count" became "deaths", and "lastKill" now means your kill.
+    if db.version < 3 then
+        if db.killers then
+            db.players = db.killers
+            db.killers = nil
+        end
+        for _, entry in pairs(db.players) do
+            entry.deaths = entry.count or 0
+            entry.lastDeath = entry.lastKill
+            entry.kills = 0
+            entry.count, entry.lastKill, entry.firstKill = nil, nil, nil
+        end
+    end
+
+    db.version = DB_VERSION
+end
+
 local events = {}
 
 function events.ADDON_LOADED(loadedName)
@@ -328,16 +436,8 @@ function events.ADDON_LOADED(loadedName)
     end
     BlackBookDB = BlackBookDB or {}
     MergeDefaults(BlackBookDB, defaults)
+    Migrate(BlackBookDB)
     ns.db = BlackBookDB
-
-    if ns.db.version < 2 then
-        for _, entry in pairs(ns.db.killers) do
-            entry.assists = entry.assists or 0
-            entry.firstSeen = entry.firstSeen or entry.firstKill
-            entry.lastSeen = entry.lastSeen or entry.lastKill
-        end
-        ns.db.version = 2
-    end
 end
 
 function events.PLAYER_LOGIN()
@@ -346,10 +446,32 @@ function events.PLAYER_LOGIN()
 end
 
 function events.PLAYER_DEAD()
+    if ns.db.streak > 0 then
+        if ns.db.announce then
+            ns.Print(format("Your kill streak of %d has ended.", ns.db.streak))
+        end
+        ns.db.streak = 0
+        ns.UI:Refresh()
+    end
+
     if IsInInstance() then
         return
     end
     ProcessDeath(1)
+end
+
+function events.PARTY_KILL(attackerGUID, targetGUID)
+    attackerGUID, targetGUID = Readable(attackerGUID), Readable(targetGUID)
+    if type(attackerGUID) ~= "string" or type(targetGUID) ~= "string" then
+        return
+    end
+    if not targetGUID:find("^Player%-") or IsInInstance() then
+        return
+    end
+    if attackerGUID ~= UnitGUID("player") and attackerGUID ~= UnitGUID("pet") then
+        return
+    end
+    RecordKill(targetGUID)
 end
 
 local eventFrame = CreateFrame("Frame")

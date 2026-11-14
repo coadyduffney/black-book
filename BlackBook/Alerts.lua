@@ -8,31 +8,22 @@ local ALERT_SOUND = SOUNDKIT and SOUNDKIT.RAID_WARNING or 8959
 local lastAlerted = {}
 local alertFrame
 
-local function Readable(value)
-    if value ~= nil and issecretvalue and issecretvalue(value) then
-        return nil
-    end
-    return value
-end
+local Readable = ns.Readable
 
--- Death recap names cross-realm players as "Name-Realm", with spaces removed from the realm.
 local function GetUnitFullName(unit)
     local name, realm = UnitName(unit)
     name, realm = Readable(name), Readable(realm)
     if type(name) ~= "string" then
         return nil
     end
-    if type(realm) == "string" and realm ~= "" then
-        return name .. "-" .. realm:gsub("%s", "")
-    end
-    return name
+    return ns.MakeKey(name, realm)
 end
 
 local function FindEntry(unit)
     local guid = Readable(UnitGUID(unit))
     local name = GetUnitFullName(unit)
 
-    for _, entry in pairs(ns.db.killers) do
+    for _, entry in pairs(ns.db.players) do
         if guid and entry.guid == guid then
             return entry
         end
@@ -67,26 +58,15 @@ local function CreateAlertFrame()
     return f
 end
 
-local function Describe(entry)
-    local parts = {}
-    if entry.count > 0 then
-        parts[#parts + 1] = entry.count == 1 and "killed you once" or ("killed you " .. entry.count .. " times")
-    end
-    if entry.assists > 0 then
-        parts[#parts + 1] = entry.assists == 1 and "1 assist" or (entry.assists .. " assists")
-    end
-    return table.concat(parts, ", ")
-end
-
 function ns.ShowAlert(entry)
     alertFrame = alertFrame or CreateAlertFrame()
 
     local color = entry.class and RAID_CLASS_COLORS[entry.class]
     local coloredName = color and color:WrapTextInColorCode(entry.name) or entry.name
-    local details = Describe(entry)
+    local details = "Your record: " .. ns.FormatRecord(entry)
 
     alertFrame.title:SetText(coloredName .. " is nearby!")
-    alertFrame.subtitle:SetText((details:gsub("^%l", string.upper)))
+    alertFrame.subtitle:SetText(details)
     alertFrame.fadeOut:Stop()
     alertFrame:SetAlpha(1)
     alertFrame:Show()
@@ -95,7 +75,7 @@ function ns.ShowAlert(entry)
     if ns.db.alertSound then
         PlaySound(ALERT_SOUND, "Master")
     end
-    ns.Print(format("%s is nearby (%s).", coloredName, details))
+    ns.Print(format("%s is nearby. %s.", coloredName, details))
 end
 
 local function CheckUnit(unit)
@@ -112,7 +92,7 @@ local function CheckUnit(unit)
     end
 
     ns.UpdateLevel(entry, unit)
-    if not ns.db.alerts then
+    if not ns.db.alerts or not ns.IsListed(entry) then
         return
     end
 

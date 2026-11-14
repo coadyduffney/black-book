@@ -3,23 +3,24 @@ local _, ns = ...
 local UI = {}
 ns.UI = UI
 
-local FRAME_WIDTH, FRAME_HEIGHT = 400, 420
+local FRAME_WIDTH, FRAME_HEIGHT = 440, 420
 local ROW_HEIGHT = 20
-local COLUMNS = {
-    { key = "name", label = "Name", x = 6, width = 150, justify = "LEFT" },
-    { key = "count", label = "Kills", x = 160, width = 45, justify = "RIGHT" },
-    { key = "assists", label = "Assists", x = 212, width = 55, justify = "RIGHT" },
-    { key = "lastSeen", label = "Last", x = 275, width = 70, justify = "RIGHT" },
-}
+local COLUMN_GAP = 8
+
+local frame
+
+local function Plural(count, word)
+    return count .. " " .. word .. (count == 1 and "" or "s")
+end
 
 local function FormatDate(timestamp)
     return timestamp and date("%Y-%m-%d %H:%M", timestamp) or "never"
 end
 
-local sortKey, sortAscending = "count", false
-local frame
-
 local function FormatAgo(timestamp)
+    if not timestamp then
+        return ""
+    end
     local seconds = time() - timestamp
     if seconds < 60 then
         return "just now"
@@ -36,33 +37,103 @@ local function ClassColoredName(entry)
     return color and color:WrapTextInColorCode(entry.name) or entry.name
 end
 
-local function Compare(a, b)
-    local left, right = a[sortKey], b[sortKey]
-    if left ~= right then
-        if sortAscending then
-            return left < right
-        end
-        return left > right
+-- Your kills against them, then their kills against you; green when you're ahead.
+local function FormatShortRecord(entry)
+    local text = entry.kills .. "-" .. entry.deaths
+    if entry.kills > entry.deaths then
+        return GREEN_FONT_COLOR:WrapTextInColorCode(text)
+    elseif entry.kills < entry.deaths then
+        return RED_FONT_COLOR:WrapTextInColorCode(text)
     end
-    return a.name < b.name
+    return text
 end
 
-local function BuildSortedList()
-    local list = {}
-    for _, entry in pairs(ns.db.killers) do
-        list[#list + 1] = entry
+local function LayOutColumns(columns)
+    local x = 6
+    for _, column in ipairs(columns) do
+        column.x = x
+        column.justify = column.justify or "RIGHT"
+        x = x + column.width + COLUMN_GAP
     end
-    table.sort(list, Compare)
+    return columns
+end
+
+local TABS = {
+    {
+        label = "Deaths",
+        filter = ns.IsListed,
+        emptyText = "Nobody has killed you in open-world PvP yet.",
+        sortKey = "deaths",
+        columns = LayOutColumns({
+            { key = "name", label = "Name", width = 120, justify = "LEFT" },
+            { key = "deaths", label = "Killed you", width = 70 },
+            { key = "assists", label = "Assists", width = 55 },
+            { key = "record", label = "Record", width = 55 },
+            { key = "lastSeen", label = "Last", width = 60 },
+        }),
+    },
+    {
+        label = "Kills",
+        filter = function(entry) return entry.kills > 0 end,
+        emptyText = "You haven't killed anyone in open-world PvP yet.",
+        sortKey = "kills",
+        columns = LayOutColumns({
+            { key = "name", label = "Name", width = 170, justify = "LEFT" },
+            { key = "kills", label = "Kills", width = 50 },
+            { key = "record", label = "Record", width = 60 },
+            { key = "lastKill", label = "Last", width = 70 },
+        }),
+    },
+}
+
+local function GetCurrentTab()
+    return TABS[ns.db.window.tab] or TABS[1]
+end
+
+local function GetSortValue(entry, key)
+    if key == "name" then
+        return entry.name:lower()
+    elseif key == "record" then
+        return entry.kills - entry.deaths
+    end
+    return entry[key] or 0
+end
+
+local function GetCellText(entry, key)
+    if key == "name" then
+        return ClassColoredName(entry)
+    elseif key == "record" then
+        return FormatShortRecord(entry)
+    elseif key == "lastSeen" or key == "lastKill" then
+        return FormatAgo(entry[key])
+    end
+    return entry[key]
+end
+
+local function BuildSortedList(tab)
+    local list = {}
+    for _, entry in pairs(ns.db.players) do
+        if tab.filter(entry) then
+            list[#list + 1] = entry
+        end
+    end
+
+    table.sort(list, function(a, b)
+        local left, right = GetSortValue(a, tab.sortKey), GetSortValue(b, tab.sortKey)
+        if left ~= right then
+            if tab.sortAscending then
+                return left < right
+            end
+            return left > right
+        end
+        return a.name < b.name
+    end)
 
     local rows = {}
     for index, entry in ipairs(list) do
         rows[index] = { entry = entry, index = index }
     end
     return rows
-end
-
-local function Plural(count, word)
-    return count .. " " .. word .. (count == 1 and "" or "s")
 end
 
 local function ShowRowTooltip(row)
@@ -79,16 +150,19 @@ local function ShowRowTooltip(row)
         GameTooltip:AddLine("Level seen " .. FormatAgo(entry.levelSeen), 0.6, 0.6, 0.6)
     end
     GameTooltip:AddLine(" ")
-    GameTooltip:AddDoubleLine("Times killed you", entry.count, nil, nil, nil, 1, 1, 1)
+    GameTooltip:AddDoubleLine("Your record", ns.FormatRecord(entry), nil, nil, nil, 1, 1, 1)
     GameTooltip:AddDoubleLine("Assists on your death", entry.assists, nil, nil, nil, 1, 1, 1)
     GameTooltip:AddDoubleLine("First seen", FormatDate(entry.firstSeen), nil, nil, nil, 1, 1, 1)
-    GameTooltip:AddDoubleLine("Last kill", FormatDate(entry.lastKill), nil, nil, nil, 1, 1, 1)
-    GameTooltip:AddDoubleLine("Last assist", FormatDate(entry.lastAssist), nil, nil, nil, 1, 1, 1)
+    GameTooltip:AddDoubleLine("Last killed you", FormatDate(entry.lastDeath), nil, nil, nil, 1, 1, 1)
+    GameTooltip:AddDoubleLine("Last killed by you", FormatDate(entry.lastKill), nil, nil, nil, 1, 1, 1)
+    if entry.assists > 0 then
+        GameTooltip:AddDoubleLine("Last assist", FormatDate(entry.lastAssist), nil, nil, nil, 1, 1, 1)
+    end
     if entry.lastZone then
         GameTooltip:AddDoubleLine("Last seen in", entry.lastZone, nil, nil, nil, 1, 1, 1)
     end
     if entry.lastSpell then
-        GameTooltip:AddDoubleLine("Last killing blow", entry.lastSpell, nil, nil, nil, 1, 1, 1)
+        GameTooltip:AddDoubleLine("Last killing blow on you", entry.lastSpell, nil, nil, nil, 1, 1, 1)
     end
     GameTooltip:AddLine(" ")
     GameTooltip:AddLine("Right-click to remove", 0.6, 0.6, 0.6)
@@ -96,27 +170,26 @@ local function ShowRowTooltip(row)
 end
 
 StaticPopupDialogs["BLACKBOOK_REMOVE"] = {
-    text = "Remove %s from your Black Book?",
+    text = "Remove %s from your Black Book? Their kills and deaths will be erased.",
     button1 = YES,
     button2 = NO,
-    OnAccept = function(_, name) ns.RemoveKiller(name) end,
+    OnAccept = function(_, name) ns.RemoveEntry(name) end,
     timeout = 0,
     whileDead = true,
     hideOnEscape = true,
     preferredIndex = 3,
 }
 
-local function CreateColumnText(parent, column, fontObject)
-    local text = parent:CreateFontString(nil, "OVERLAY", fontObject)
+-- Rows and header buttons are shared between tabs, so each column's text is
+-- created on first use and re-anchored for whichever tab is showing.
+local function PlaceColumnText(text, column)
+    text:ClearAllPoints()
     text:SetPoint("LEFT", column.x, 0)
     text:SetWidth(column.width)
     text:SetJustifyH(column.justify)
-    text:SetWordWrap(false)
-    return text
 end
 
 local function InitRow(row, rowData)
-    local entry = rowData.entry
     if not row.columns then
         row:SetHeight(ROW_HEIGHT)
         row.stripe = row:CreateTexture(nil, "BACKGROUND")
@@ -125,11 +198,7 @@ local function InitRow(row, rowData)
         local highlight = row:CreateTexture(nil, "HIGHLIGHT")
         highlight:SetAllPoints()
         highlight:SetColorTexture(1, 1, 1, 0.1)
-
         row.columns = {}
-        for _, column in ipairs(COLUMNS) do
-            row.columns[column.key] = CreateColumnText(row, column, "GameFontHighlight")
-        end
 
         row:RegisterForClicks("RightButtonUp")
         row:SetScript("OnEnter", ShowRowTooltip)
@@ -139,17 +208,83 @@ local function InitRow(row, rowData)
         end)
     end
 
+    for _, text in pairs(row.columns) do
+        text:Hide()
+    end
+
+    local entry = rowData.entry
+    for _, column in ipairs(GetCurrentTab().columns) do
+        local text = row.columns[column.key]
+        if not text then
+            text = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+            text:SetWordWrap(false)
+            row.columns[column.key] = text
+        end
+        PlaceColumnText(text, column)
+        text:SetText(GetCellText(entry, column.key))
+        text:Show()
+    end
+
     row.entry = entry
-    row.columns.name:SetText(ClassColoredName(entry))
-    row.columns.count:SetText(entry.count)
-    row.columns.assists:SetText(entry.assists)
-    row.columns.lastSeen:SetText(FormatAgo(entry.lastSeen))
     row.stripe:SetShown(rowData.index % 2 == 0)
+end
+
+local function CreateHeader(parent)
+    local header = CreateFrame("Frame", nil, parent)
+    header:SetHeight(ROW_HEIGHT)
+    header.buttons = {}
+
+    local function GetButton(key)
+        local button = header.buttons[key]
+        if not button then
+            button = CreateFrame("Button", nil, header)
+            button.label = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            button.label:SetAllPoints()
+            button:SetScript("OnClick", function(self)
+                local tab = GetCurrentTab()
+                if tab.sortKey == self.key then
+                    tab.sortAscending = not tab.sortAscending
+                else
+                    tab.sortKey = self.key
+                    tab.sortAscending = self.key == "name"
+                end
+                UI:Refresh()
+            end)
+            button.key = key
+            header.buttons[key] = button
+        end
+        return button
+    end
+
+    function header:Update()
+        for _, button in pairs(self.buttons) do
+            button:Hide()
+        end
+
+        local tab = GetCurrentTab()
+        for _, column in ipairs(tab.columns) do
+            local button = GetButton(column.key)
+            button:ClearAllPoints()
+            button:SetPoint("LEFT", column.x, 0)
+            button:SetSize(column.width, ROW_HEIGHT)
+            button.label:SetJustifyH(column.justify)
+
+            local arrow = ""
+            if column.key == tab.sortKey then
+                arrow = tab.sortAscending and " ^" or " v"
+            end
+            button.label:SetText(column.label .. arrow)
+            button:Show()
+        end
+    end
+
+    return header
 end
 
 local function SavePosition(self)
     local point, _, relativePoint, x, y = self:GetPoint()
-    ns.db.window = { point = point, relativePoint = relativePoint, x = x, y = y }
+    local saved = ns.db.window
+    saved.point, saved.relativePoint, saved.x, saved.y = point, relativePoint, x, y
 end
 
 local function RestorePosition(self)
@@ -162,43 +297,24 @@ local function RestorePosition(self)
     end
 end
 
-local function CreateHeader(parent)
-    local header = CreateFrame("Frame", nil, parent)
-    header:SetHeight(ROW_HEIGHT)
-    header.labels = {}
+local function SelectTab(id)
+    ns.db.window.tab = id
+    PanelTemplates_SetTab(frame, id)
+    UI:Refresh()
+end
 
-    for _, column in ipairs(COLUMNS) do
-        local button = CreateFrame("Button", nil, header)
-        button:SetPoint("LEFT", column.x, 0)
-        button:SetSize(column.width, ROW_HEIGHT)
-        local label = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        label:SetAllPoints()
-        label:SetJustifyH(column.justify)
-        header.labels[column.key] = label
-        button.label = column.label
-
-        button:SetScript("OnClick", function()
-            if sortKey == column.key then
-                sortAscending = not sortAscending
-            else
-                sortKey = column.key
-                sortAscending = column.key == "name"
-            end
-            UI:Refresh()
-        end)
-    end
-
-    function header:Update()
-        for _, column in ipairs(COLUMNS) do
-            local arrow = ""
-            if column.key == sortKey then
-                arrow = sortAscending and " ^" or " v"
-            end
-            self.labels[column.key]:SetText(column.label .. arrow)
+local function CreateTabs(f)
+    for id, tab in ipairs(TABS) do
+        local button = CreateFrame("Button", "BlackBookFrameTab" .. id, f, "PanelTabButtonTemplate")
+        button:SetID(id)
+        button:SetText(tab.label)
+        button:SetScript("OnClick", function(self) SelectTab(self:GetID()) end)
+        if PanelTemplates_TabResize then
+            PanelTemplates_TabResize(button, 0)
         end
     end
-
-    return header
+    f.Tabs[1]:SetPoint("TOPLEFT", f, "BOTTOMLEFT", 8, 2)
+    PanelTemplates_SetNumTabs(f, #TABS)
 end
 
 local function CreateMainFrame()
@@ -242,13 +358,29 @@ local function CreateMainFrame()
     f.emptyText = f.scrollBox:CreateFontString(nil, "OVERLAY", "GameFontDisable")
     f.emptyText:SetPoint("CENTER")
     f.emptyText:SetWidth(FRAME_WIDTH - 80)
-    f.emptyText:SetText("Nobody has killed you in open-world PvP yet.")
 
     f.footer = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     f.footer:SetPoint("BOTTOMLEFT", 14, 12)
 
+    CreateTabs(f)
     RestorePosition(f)
     return f
+end
+
+local function GetFooterText(tab, rows)
+    if tab == TABS[1] then
+        local deaths = 0
+        for _, row in ipairs(rows) do
+            deaths = deaths + row.entry.deaths
+        end
+        return Plural(#rows, "player") .. ", " .. Plural(deaths, "death")
+    end
+
+    local kills = 0
+    for _, row in ipairs(rows) do
+        kills = kills + row.entry.kills
+    end
+    return format("%s, kill streak: %d (best %d)", Plural(kills, "kill"), ns.db.streak, ns.db.bestStreak)
 end
 
 function UI:Refresh()
@@ -256,22 +388,20 @@ function UI:Refresh()
         return
     end
 
-    local rows = BuildSortedList()
-    local totalDeaths = 0
-    for _, row in ipairs(rows) do
-        totalDeaths = totalDeaths + row.entry.count
-    end
+    local tab = GetCurrentTab()
+    local rows = BuildSortedList(tab)
 
     frame.header:Update()
     frame.scrollBox:SetDataProvider(CreateDataProvider(rows), ScrollBoxConstants.RetainScrollPosition)
+    frame.emptyText:SetText(tab.emptyText)
     frame.emptyText:SetShown(#rows == 0)
-    frame.footer:SetText(Plural(#rows, "player") .. ", " .. Plural(totalDeaths, "kill"))
+    frame.footer:SetText(GetFooterText(tab, rows))
 end
 
 function UI:Toggle()
     if not frame then
         frame = CreateMainFrame()
-        frame:SetScript("OnShow", function() UI:Refresh() end)
+        frame:SetScript("OnShow", function() SelectTab(ns.db.window.tab) end)
     end
     frame:SetShown(not frame:IsShown())
 end
