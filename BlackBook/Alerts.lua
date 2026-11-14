@@ -99,7 +99,7 @@ function ns.ShowAlert(entry)
 end
 
 local function CheckUnit(unit)
-    if not ns.db or not ns.db.alerts or IsInInstance() then
+    if not ns.db or IsInInstance() then
         return
     end
     if not Readable(UnitIsPlayer(unit)) or not Readable(UnitIsEnemy("player", unit)) then
@@ -108,6 +108,11 @@ local function CheckUnit(unit)
 
     local entry = FindEntry(unit)
     if not entry then
+        return
+    end
+
+    ns.UpdateLevel(entry, unit)
+    if not ns.db.alerts then
         return
     end
 

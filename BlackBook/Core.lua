@@ -12,7 +12,10 @@ local defaults = {
     alertSound = true,
     killers = {},
     window = {},
+    minimap = { hide = false, angle = 225 },
 }
+
+local MAX_NAMEPLATES = 40
 
 local lastRecapIdentity
 
@@ -26,6 +29,31 @@ local function Readable(value)
         return nil
     end
     return value
+end
+ns.Readable = Readable
+
+-- Only units the game has a token for can be inspected, so look where the player might be visible.
+local function FindUnitByGUID(guid)
+    for _, unit in ipairs({ "target", "mouseover", "focus" }) do
+        if Readable(UnitGUID(unit)) == guid then
+            return unit
+        end
+    end
+    for i = 1, MAX_NAMEPLATES do
+        local unit = "nameplate" .. i
+        if Readable(UnitGUID(unit)) == guid then
+            return unit
+        end
+    end
+end
+
+-- UnitLevel returns -1 for players too far above you to see their level.
+function ns.UpdateLevel(entry, unit)
+    local level = Readable(UnitLevel(unit))
+    if type(level) == "number" and level ~= 0 then
+        entry.level = level
+        entry.levelSeen = time()
+    end
 end
 
 local function MergeDefaults(target, source)
@@ -123,6 +151,11 @@ local function GetOrCreateEntry(source, now)
     end
 
     entry.guid = source.guid
+
+    local unit = FindUnitByGUID(source.guid)
+    if unit then
+        ns.UpdateLevel(entry, unit)
+    end
 
     local ok, _, englishClass, localizedRace = pcall(GetPlayerInfoByGUID, source.guid)
     if ok then
@@ -246,6 +279,10 @@ SlashCmdList.BLACKBOOK = function(input)
     elseif command == "sound" then
         ns.db.alertSound = not ns.db.alertSound
         ns.Print("Alert sound " .. (ns.db.alertSound and "on." or "off."))
+    elseif command == "minimap" then
+        ns.db.minimap.hide = not ns.db.minimap.hide
+        ns.UpdateMinimapButton()
+        ns.Print("Minimap button " .. (ns.db.minimap.hide and "hidden." or "shown."))
     elseif command == "test" then
         ns.ShowAlert({ name = UnitName("player"), class = select(2, UnitClass("player")), count = 3, assists = 1 })
     elseif command == "reset" then
@@ -258,6 +295,7 @@ SlashCmdList.BLACKBOOK = function(input)
         print("  /blackbook announce - toggle the chat message when players kill you")
         print("  /blackbook alerts - toggle the warning when a listed player is nearby")
         print("  /blackbook sound - toggle the warning sound")
+        print("  /blackbook minimap - show or hide the minimap button")
         print("  /blackbook test - show a sample warning")
         print("  /blackbook last - explain how your last death was read")
         print("  /blackbook reset - erase all entries")

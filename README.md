@@ -7,7 +7,7 @@ A World of Warcraft: Forever addon that remembers the players who kill you in op
 - Records the player who landed the killing blow each time you die in the open world.
 - Records assists: every other player who damaged you just before you died.
 - A movable window listing each player's name (in class colour), kills, assists, and how long ago you last ran into them. Click a column header to sort by it.
-- A tooltip for each player, showing race and class, first and last encounters, the zone, and the last killing-blow spell.
+- A tooltip for each player, showing level, race and class, first and last encounters, the zone, and the last killing-blow spell.
 - An optional chat message whenever players kill you.
 - A warning on screen, with a sound, when a player in your Black Book comes into range.
 
@@ -29,10 +29,11 @@ Deaths inside battlegrounds, arenas, dungeons and raids are ignored.
 | `/blackbook alerts` | Turn the nearby-player warning on or off |
 | `/blackbook sound` | Turn the warning sound on or off |
 | `/blackbook test` | Show a sample warning |
+| `/blackbook minimap` | Show or hide the minimap button |
 | `/blackbook last` | Show how your most recent death was read |
 | `/blackbook reset` | Erase all entries |
 
-You can also open the window from the addon button by the minimap. Right-click a player in the list to remove them.
+You can also open the window with Black Book's own minimap button, which you can drag around the minimap's edge, or from the addon button by the minimap. Right-click a player in the list to remove them.
 
 ## How it works
 

@@ -69,9 +69,14 @@ local function ShowRowTooltip(row)
     local entry = row.entry
     GameTooltip:SetOwner(row, "ANCHOR_RIGHT")
     GameTooltip:AddLine(ClassColoredName(entry))
-    if entry.race or entry.class then
-        local className = entry.class and LOCALIZED_CLASS_NAMES_MALE[entry.class]
-        GameTooltip:AddLine(strtrim((entry.race or "") .. " " .. (className or "")), 1, 1, 1)
+    local levelText = entry.level and ("Level " .. (entry.level == -1 and "??" or entry.level)) or ""
+    local className = entry.class and LOCALIZED_CLASS_NAMES_MALE[entry.class]
+    local description = strtrim(levelText .. " " .. (entry.race or "") .. " " .. (className or ""))
+    if description ~= "" then
+        GameTooltip:AddLine(description, 1, 1, 1)
+    end
+    if entry.levelSeen then
+        GameTooltip:AddLine("Level seen " .. FormatAgo(entry.levelSeen), 0.6, 0.6, 0.6)
     end
     GameTooltip:AddLine(" ")
     GameTooltip:AddDoubleLine("Times killed you", entry.count, nil, nil, nil, 1, 1, 1)
