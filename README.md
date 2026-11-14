@@ -25,6 +25,7 @@ Deaths inside battlegrounds, arenas, dungeons and raids are ignored.
 | Command | What it does |
 | --- | --- |
 | `/blackbook` or `/bbook` | Show or hide the window |
+| `/blackbook help` | List all commands in chat |
 | `/blackbook announce` | Turn the chat message on or off |
 | `/blackbook alerts` | Turn the nearby-player warning on or off |
 | `/blackbook sound` | Turn the warning sound on or off |

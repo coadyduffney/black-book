@@ -264,6 +264,26 @@ StaticPopupDialogs["BLACKBOOK_RESET"] = {
     preferredIndex = 3,
 }
 
+local HELP_LINES = {
+    { "", "show or hide the window" },
+    { "help", "list these commands" },
+    { "announce", "toggle the chat message when players kill you" },
+    { "alerts", "toggle the warning when a listed player is nearby" },
+    { "sound", "toggle the warning sound" },
+    { "minimap", "show or hide the minimap button" },
+    { "test", "show a sample warning" },
+    { "last", "explain how your last death was read" },
+    { "reset", "erase all entries" },
+}
+
+local function PrintHelp()
+    ns.Print("Commands (/bbook works too):")
+    for _, line in ipairs(HELP_LINES) do
+        local command = line[1] == "" and "/blackbook" or ("/blackbook " .. line[1])
+        print(format("  |cffffd100%s|r - %s", command, line[2]))
+    end
+end
+
 SLASH_BLACKBOOK1 = "/blackbook"
 SLASH_BLACKBOOK2 = "/bbook"
 SlashCmdList.BLACKBOOK = function(input)
@@ -289,16 +309,10 @@ SlashCmdList.BLACKBOOK = function(input)
         StaticPopup_Show("BLACKBOOK_RESET")
     elseif command == "last" then
         PrintLastRecap()
+    elseif command == "help" then
+        PrintHelp()
     else
-        ns.Print("Commands:")
-        print("  /blackbook - show or hide the window")
-        print("  /blackbook announce - toggle the chat message when players kill you")
-        print("  /blackbook alerts - toggle the warning when a listed player is nearby")
-        print("  /blackbook sound - toggle the warning sound")
-        print("  /blackbook minimap - show or hide the minimap button")
-        print("  /blackbook test - show a sample warning")
-        print("  /blackbook last - explain how your last death was read")
-        print("  /blackbook reset - erase all entries")
+        ns.Print(format("Unknown command \"%s\". Type /blackbook help for a list of commands.", command))
     end
 end
 
